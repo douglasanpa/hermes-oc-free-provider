@@ -12,31 +12,37 @@ _PLUGIN_DIR = Path(__file__).parent
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from hermes_oc_client import (  # type: ignore[import-not-found]
+from hermes_oc_harness import (  # type: ignore[import-not-found]
     DEFAULT_MODEL,
-    FALLBACK_MODELS,
     LOGICAL_BASE_URL,
-    OpenCodeClient,
+    HarnessClient,
 )
 from providers import register_provider  # type: ignore[import-not-found]
 from providers.base import ProviderProfile  # type: ignore[import-not-found]
 
+FALLBACK_MODELS = (
+    DEFAULT_MODEL,
+    "glm-5.3-flash-free",
+    "beam-free",
+    "deepseek-v4.1-flash-free",
+    "nemotron-3.5-super-vl-free",
+    "nemotron-3-ultra-free",
+    "flint-40b-free",
+)
+
 
 class OpenCodeFreeProfile(ProviderProfile):
-    def create_client(self, **client_kwargs: Any) -> OpenCodeClient:
-        return OpenCodeClient(**client_kwargs)
+    def create_client(self, **client_kwargs: Any) -> HarnessClient:
+        return HarnessClient(**client_kwargs)
 
     def fetch_models(
         self,
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        timeout: float = 15.0,
+        timeout: float = 30.0,
     ) -> list[str] | None:
-        client = OpenCodeClient(
-            api_key=api_key,
-            base_url=base_url or self.base_url,
-        )
+        client = HarnessClient()
         try:
             return client.list_models(timeout=timeout) or None
         except Exception:  # noqa: BLE001 -- catalog hooks are required to fail soft.
@@ -49,18 +55,16 @@ opencode_free = OpenCodeFreeProfile(
     name="opencode-free",
     aliases=("oc-free",),
     display_name="OpenCode Free",
-    description="Unofficial OpenCode free-model compatibility with Hermes-local tools",
+    description="OpenCode free models, served by the local OpenCode harness",
     api_mode="chat_completions",
     auth_type="external_process",
     env_vars=(),
     base_url=LOGICAL_BASE_URL,
-    # Hermes 0.21 routes credential-free custom clients through this seam. The
-    # executable is Hermes' own Python; the provider never spawns it.
     process_command=sys.executable,
     process_command_env_vars=(),
     fallback_models=FALLBACK_MODELS,
     default_aux_model=DEFAULT_MODEL,
-    model_capabilities={model: {"supports_tools": True} for model in FALLBACK_MODELS},
+    model_capabilities={model: {"supports_tools": False} for model in FALLBACK_MODELS},
 )
 
 register_provider(opencode_free)
