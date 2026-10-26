@@ -107,6 +107,9 @@ class HarnessClient:
         if self._session:
             command.extend(["--session", self._session])
         command.append(prompt)
+        env = os.environ.copy()
+        env.pop("PWD", None)
+        env.pop("OLDPWD", None)
         try:
             completed = subprocess.run(
                 command,
@@ -114,6 +117,8 @@ class HarnessClient:
                 text=True,
                 timeout=timeout,
                 check=False,
+                env=env,
+                cwd=os.path.expanduser("~"),
             )
         except subprocess.TimeoutExpired as exc:
             raise HarnessError(
@@ -165,12 +170,17 @@ class HarnessClient:
             raise HarnessUnavailable(
                 "opencode CLI not found; set OPENCODE_BIN or install opencode to use free models"
             )
+        env = os.environ.copy()
+        env.pop("PWD", None)
+        env.pop("OLDPWD", None)
         completed = subprocess.run(
             [binary, "models"],
             capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
+            env=env,
+            cwd=os.path.expanduser("~"),
         )
         if completed.returncode != 0:
             raise HarnessError(
