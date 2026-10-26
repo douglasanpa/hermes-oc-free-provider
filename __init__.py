@@ -16,6 +16,7 @@ from hermes_oc_harness import (  # type: ignore[import-not-found]
     DEFAULT_MODEL,
     LOGICAL_BASE_URL,
     HarnessClient,
+    tool_intercept_enabled,
 )
 from providers import register_provider  # type: ignore[import-not-found]
 from providers.base import ProviderProfile  # type: ignore[import-not-found]
@@ -64,7 +65,9 @@ opencode_free = OpenCodeFreeProfile(
     process_command_env_vars=(),
     fallback_models=FALLBACK_MODELS,
     default_aux_model=DEFAULT_MODEL,
-    model_capabilities={model: {"supports_tools": False} for model in FALLBACK_MODELS},
+    model_capabilities={
+        model: {"supports_tools": tool_intercept_enabled()} for model in FALLBACK_MODELS
+    },
 )
 
 register_provider(opencode_free)

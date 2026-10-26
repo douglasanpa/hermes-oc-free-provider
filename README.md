@@ -114,6 +114,45 @@ the verified entries bundled with it when no cache exists. It selects
 Model availability, pricing, retention, and data-use rules belong to OpenCode
 and the underlying provider and can change independently of this repository.
 
+## Tool interception (experimental)
+
+By default the harness returns text only: OpenCode runs its own tools and Hermes
+receives just the final answer. Setting `HERMES_OC_TOOL_INTERCEPT=1` flips the
+model into a tool-call provider for Hermes instead.
+
+How it works: the child `opencode run` gets
+`OPENCODE_CONFIG_CONTENT={"permission":{"*":"ask"}}` and no `--auto`. A
+non-interactive run cannot prompt, so every tool call is auto-rejected — but the
+`tool_use` event still carries the full tool name and input. The harness parses
+those events, maps OpenCode names to Hermes names (`shell`/`bash` → `terminal`,
+`read` → `read_file`, `write` → `write_file`, `edit` → `patch`, `glob`/`grep` →
+`search_files`, ...) and returns OpenAI-shaped `tool_calls`. Hermes executes them
+under its own approval rules and sends the results back on the next turn, which
+the harness renders into the prompt (`render_transcript`, stateless, no
+`--session` reuse).
+
+Constraints verified against opencode 2.1.4:
+
+- The tool schema must stay untouched. Removing tools (`tools: {"*": false}`) or
+  swapping to a custom agent with tools disabled makes the free tier answer
+  `429 FreeUsageLimitError`: permission changes are accepted, toolset changes are
+  not.
+- Every tool step costs one full OpenCode turn, so latency and free-quota use
+  roughly double compared to the text-only mode.
+- The model still sees the auto-rejection message and may invent the tool output
+  in the same turn. The harness keeps the tool call, so Hermes ignores that text,
+  but a turn that fabricates output *without* calling a tool cannot be detected
+  here.
+
+Fallback: leave the variable unset or set it to `0` and the old text-only path is
+used unchanged.
+
+Live check (real model, two hops):
+
+```bash
+HERMES_OC_TOOL_INTERCEPT=1 python scripts/probe_tool_intercept.py
+```
+
 ## Verify
 
 ```bash

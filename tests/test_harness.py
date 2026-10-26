@@ -142,6 +142,119 @@ class ClientTests(unittest.TestCase):
                     self.assertEqual(harness.opencode_binary(), "/opt/opencode")
 
 
+class ToolInterceptTests(unittest.TestCase):
+    STDOUT = "\n".join(
+        [
+            '{"type":"step_start","sessionID":"ses_t","part":{"type":"step-start"}}',
+            '{"type":"text","sessionID":"ses_t","part":{"type":"text","text":"vou listar"}}',
+            (
+                '{"type":"tool_use","sessionID":"ses_t","part":{"type":"tool",'
+                '"id":"call_1","tool":"shell","state":{"status":"error",'
+                '"input":{"command":"echo hi"},'
+                '"error":"This non-interactive run cannot ask the user for permission"}}}'
+            ),
+            (
+                '{"type":"tool_use","sessionID":"ses_t","part":{"type":"tool",'
+                '"id":"call_2","tool":"shell","state":{"status":"error",'
+                '"input":{"command":"echo hi"}}}}'
+            ),
+            (
+                '{"type":"tool_use","sessionID":"ses_t","part":{"type":"tool",'
+                '"id":"call_3","tool":"read","state":{"status":"error",'
+                '"input":{"filePath":"a.txt"}}}}'
+            ),
+        ]
+    )
+
+    def _run(self, stdout: str = STDOUT, **create_kwargs):
+        completed = SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+        client = harness.HarnessClient()
+        with (
+            mock.patch.object(harness, "opencode_binary", return_value="/usr/bin/opencode"),
+            mock.patch.object(subprocess, "run", return_value=completed) as run,
+            mock.patch.dict(os.environ, {harness.TOOL_INTERCEPT_ENV: "1"}),
+        ):
+            result = client.chat.completions.create(
+                model="beam-free",
+                messages=[{"role": "user", "content": "a"}],
+                **create_kwargs,
+            )
+        return result, run
+
+    def test_tool_events_become_openai_tool_calls(self):
+        result, _ = self._run()
+        message = result.choices[0].message
+        self.assertEqual(result.choices[0].finish_reason, "tool_calls")
+        names = [call.function.name for call in message.tool_calls]
+        self.assertEqual(names, ["terminal", "read_file"])
+        self.assertIn('"command": "echo hi"', message.tool_calls[0].function.arguments)
+        self.assertEqual(message.content, "vou listar")
+
+    def test_duplicate_calls_are_collapsed(self):
+        result, _ = self._run()
+        self.assertEqual(len(result.choices[0].message.tool_calls), 2)
+
+    def test_intercept_uses_permission_config_and_no_auto(self):
+        _, run = self._run()
+        command = run.call_args.args[0]
+        self.assertNotIn("--auto", command)
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["OPENCODE_CONFIG_CONTENT"], '{"permission":{"*":"ask"}}')
+
+    def test_plain_text_keeps_legacy_path(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout='{"type":"text","sessionID":"ses_l","part":{"type":"text","text":"OK"}}',
+            stderr="",
+        )
+        client = harness.HarnessClient()
+        with (
+            mock.patch.object(harness, "opencode_binary", return_value="/usr/bin/opencode"),
+            mock.patch.object(subprocess, "run", return_value=completed) as run,
+            mock.patch.dict(os.environ, {harness.TOOL_INTERCEPT_ENV: "0"}),
+        ):
+            result = client.chat.completions.create(
+                model="beam-free", messages=[{"role": "user", "content": "hi"}]
+            )
+        self.assertIn("--auto", run.call_args.args[0])
+        self.assertEqual(result.choices[0].message.content, "OK")
+        self.assertEqual(result.choices[0].message.tool_calls, [])
+
+
+class TranscriptTests(unittest.TestCase):
+    def test_tool_results_and_prior_calls_are_rendered(self):
+        prompt = harness.render_transcript(
+            [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "run it"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "terminal", "arguments": '{"command":"ls"}'},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "c1", "content": "a.txt"},
+            ],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {"name": "terminal", "parameters": {"type": "object"}},
+                }
+            ],
+        )
+        self.assertIn("USER:\nrun it", prompt)
+        self.assertIn("terminal({\"command\":\"ls\"})", prompt)
+        self.assertIn("TOOL CALLS the host already executed:", prompt)
+        self.assertIn("TOOL RESULT [c1] (authoritative, already executed):\na.txt", prompt)
+        self.assertIn("AVAILABLE HOST TOOLS: terminal", prompt)
+        self.assertIn(harness._INTERCEPT_GUIDANCE, prompt)
+
+
 class ListModelsTests(unittest.TestCase):
     def test_filters_to_free_opencode_models(self):
         completed = SimpleNamespace(
