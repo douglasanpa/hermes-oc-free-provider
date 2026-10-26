@@ -106,13 +106,13 @@ class HarnessClient:
         ]
         if self._session:
             command.extend(["--session", self._session])
-        command.append(prompt)
         env = os.environ.copy()
         env.pop("PWD", None)
         env.pop("OLDPWD", None)
         try:
             completed = subprocess.run(
                 command,
+                input=prompt,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
