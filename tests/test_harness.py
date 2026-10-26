@@ -75,6 +75,13 @@ class ParseTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def setUp(self):
+        # The legacy path must be deterministic even when the gateway/shell
+        # exports HERMES_OC_TOOL_INTERCEPT=1 for real runs.
+        patcher = mock.patch.dict(os.environ, {harness.TOOL_INTERCEPT_ENV: "0"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_session_is_reused_across_calls(self):
         completed = SimpleNamespace(
             returncode=0,
@@ -198,6 +205,9 @@ class ToolInterceptTests(unittest.TestCase):
         _, run = self._run()
         command = run.call_args.args[0]
         self.assertNotIn("--auto", command)
+        # --standalone is what makes OPENCODE_CONFIG_CONTENT actually apply;
+        # without it the shared `serve --service` daemon ignores permissions.
+        self.assertIn("--standalone", command)
         env = run.call_args.kwargs["env"]
         self.assertEqual(env["OPENCODE_CONFIG_CONTENT"], '{"permission":{"*":"ask"}}')
 

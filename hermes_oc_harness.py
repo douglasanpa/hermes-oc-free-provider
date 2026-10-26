@@ -239,7 +239,14 @@ class HarnessClient:
             "--format",
             "json",
         ]
-        if not intercept:
+        if intercept:
+            # Without --standalone the client delegates to the shared `opencode
+            # serve --service` daemon, which ignores our OPENCODE_CONFIG_CONTENT
+            # and happily runs every tool. Standalone applies the deny/ask
+            # permission config, so the call is rejected before execution while
+            # the tool_use event still carries name + input.
+            command.append("--standalone")
+        else:
             command.append("--auto")
         command.extend(["-m", reference])
         if self._session and not intercept:
