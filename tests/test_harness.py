@@ -114,6 +114,26 @@ class ClientTests(unittest.TestCase):
                     model="beam-free", messages=[{"role": "user", "content": "a"}]
                 )
         self.assertIn("Model unavailable", str(caught.exception))
+        self.assertEqual(caught.exception.status_code, 502)
+
+    def test_quota_exhaustion_raises_429(self):
+        quota_err = (
+            '{"error":{"type":"provider.quota","message":"Free usage limit reached. ' 
+            'Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go",'
+            '"status":429,"name":"FreeUsageLimitError"}}'
+        )
+        completed = SimpleNamespace(returncode=1, stdout=quota_err, stderr="")
+        client = harness.HarnessClient()
+        with (
+            mock.patch.object(harness, "opencode_binary", return_value="/usr/bin/opencode"),
+            mock.patch.object(subprocess, "run", return_value=completed),
+        ):
+            with self.assertRaises(harness.HarnessError) as caught:
+                client.chat.completions.create(
+                    model="beam-free", messages=[{"role": "user", "content": "a"}]
+                )
+        self.assertEqual(caught.exception.status_code, 429)
+        self.assertIn("Free usage limit reached", str(caught.exception))
 
     def test_response_exposes_openai_shaped_result(self):
         completed = SimpleNamespace(

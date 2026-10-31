@@ -26,6 +26,20 @@ class HarnessUnavailable(HarnessError):
     pass
 
 
+_QUOTA_ERROR_MARKERS = (
+    '"status":429',
+    "provider.quota",
+    "FreeUsageLimitError",
+    "Free usage limit reached",
+)
+
+
+def _status_for_failure(detail: str) -> int:
+    if any(marker in detail for marker in _QUOTA_ERROR_MARKERS):
+        return 429
+    return 502
+
+
 def opencode_binary() -> str | None:
     configured = os.environ.get(OPENCODE_BIN_ENV)
     if configured:
@@ -128,7 +142,7 @@ class HarnessClient:
             detail = (completed.stderr or completed.stdout or "").strip()[-500:]
             raise HarnessError(
                 f"opencode harness failed with exit {completed.returncode}: {detail}",
-                status_code=502,
+                status_code=_status_for_failure(detail),
             )
         return self._parse(completed.stdout)
 
@@ -183,9 +197,10 @@ class HarnessClient:
             cwd=os.path.expanduser("~"),
         )
         if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()[-500:]
             raise HarnessError(
                 f"opencode models failed with exit {completed.returncode}",
-                status_code=502,
+                status_code=_status_for_failure(detail),
             )
         prefix = f"{DEFAULT_PROVIDER}/"
         found = [
